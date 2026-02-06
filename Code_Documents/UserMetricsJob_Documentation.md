@@ -1,18 +1,25 @@
-## Comprehensive Documentation for UserMetricsJob
+# UserMetricsJob Documentation
 
-### Executive Summary
-- **Project Overview**: Documentation generated for a Spark-based ETL job (`UserMetricsJob`).
-- **Key Achievements**: 100% module coverage, preservation of business logic, intent, and data behavior.
-- **Success Metrics**: Documentation completeness (98%), accuracy (99%), knowledge retention (100%).
-- **Recommendations**: Regular documentation updates, integration with CI/CD, migration planning.
+## Overview
+This document provides comprehensive documentation for the `UserMetricsJob` class, which demonstrates common Spark patterns for data processing. The job reads data from CSV files, processes it using Spark transformations, and writes the output as a Parquet dataset.
 
-### Detailed Analysis
-#### Requirements Assessment
-- **Purpose**: The `UserMetricsJob` processes event and user data to generate insights such as revenue, event counts, and country-based rankings.
-- **Inputs**:
-  - `events.csv`: Contains event data with columns `user_id`, `event_type`, `score`, `amount`, `ts` (timestamp).
-  - `users.csv`: Contains user data with columns `user_id`, `country`.
-- **Output**: Parquet dataset with the following columns:
+## Key Features
+- **SparkSession Configuration**: Adaptive Query Execution (AQE) and shuffle partitions.
+- **Data Input**: Reads CSV files (`events.csv` and `users.csv`) with explicit schemas.
+- **Data Processing**:
+  - Filters data by event type and time window.
+  - Buckets scores using either a UDF or built-in column expressions.
+  - Aggregates user revenue and event counts.
+  - Joins data with broadcast hints.
+  - Applies window functions for ranking users by revenue per country.
+- **Output**: Writes the processed data as a Parquet dataset.
+
+## Inputs
+- `events.csv`: Contains the columns `user_id`, `event_type`, `score`, `amount`, and `ts` (timestamp in ISO-8601 format).
+- `users.csv`: Contains the columns `user_id` and `country`.
+
+## Output
+- A Parquet dataset with the following columns:
   - `country`
   - `user_id`
   - `revenue`
@@ -20,80 +27,81 @@
   - `score_bucket`
   - `country_rank`
 
-#### Technical Approach
-- **SparkSession Configuration**:
-  - Adaptive Query Execution (AQE) enabled.
-  - Shuffle partitions set to 8.
-- **Data Loading**:
-  - Explicit schemas defined for both `events.csv` and `users.csv`.
-  - CSV files read with headers.
-- **Transformations**:
-  - Filtering events by type (`click`, `purchase`) and date window.
-  - Score bucketing using both UDF and built-in methods.
-  - Aggregating user revenue and event counts.
-  - Joining user dimensions with broadcast hints.
-  - Ranking users by revenue per country using window functions.
-  - Ensuring deterministic output ordering for validation.
+## Code Structure
+### Main Method
+The main method initializes the Spark session, reads input arguments, and orchestrates the job execution. It includes error handling and logging to ensure robustness.
 
-#### Code Complexity
-- **Language**: Java.
-- **Key Patterns**:
-  - Use of Spark SQL functions and UDFs.
-  - Window functions for ranking.
-  - Error handling with logging.
+### Methods
+#### `loadEvents`
+Reads the `events.csv` file with an explicit schema and returns a `Dataset<Row>`.
+- Schema:
+  - `user_id`: String
+  - `event_type`: String
+  - `score`: Integer
+  - `amount`: Double
+  - `ts`: Timestamp
 
-### Step-by-Step Implementation
-1. **Setup SparkSession**:
-   - Enable AQE and configure shuffle partitions.
-2. **Load Input Data**:
-   - Define schemas for `events.csv` and `users.csv`.
-   - Read CSV files into DataFrames.
-3. **Transform Data**:
-   - Filter events by type and date.
-   - Bucket scores using either UDF or built-in expressions.
-   - Aggregate revenue and event counts.
-   - Join with user dimensions using broadcast hints.
-   - Rank users by revenue per country.
-4. **Write Output**:
-   - Save the transformed DataFrame as a Parquet dataset.
-   - Ensure deterministic ordering for validation.
+#### `loadUsers`
+Reads the `users.csv` file with an explicit schema and returns a `Dataset<Row>`.
+- Schema:
+  - `user_id`: String
+  - `country`: String
 
-### Quality Assurance
-- **Validation**:
-  - Verified output schema and data consistency.
-  - Performed peer reviews and automated checks.
-- **Performance Metrics**:
-  - Execution time and resource utilization monitored.
-- **Security Assessment**:
-  - No sensitive information exposed in logs or outputs.
+#### `transform`
+Processes the input datasets and applies the following transformations:
+1. Filters events by type and time window.
+2. Buckets scores using either a UDF or built-in column expressions.
+3. Aggregates user revenue and event counts.
+4. Joins with user dimensions using a broadcast hint.
+5. Applies a window function to rank users by revenue per country.
+6. Ensures deterministic ordering for validation.
 
-### Recommendations
-- **Best Practices**:
-  - Regularly update documentation with code changes.
-  - Integrate documentation generation with CI/CD pipelines.
-  - Plan for migration to newer Spark versions if needed.
-- **Enhancements**:
-  - Optimize shuffle partitions for larger datasets.
-  - Implement additional validation checks for input data.
+## Business Logic and Assumptions
+- Events are filtered to include only `click` and `purchase` types.
+- The time window for events is defined by `--from` and `--to` arguments.
+- Score bucketing can be toggled between a UDF and built-in logic using the `--useUdf` argument.
+- Revenue and event counts are aggregated per user.
+- Users are ranked by revenue within each country.
 
-### Troubleshooting Guide
-- **Common Issues**:
-  - Missing or malformed input files.
-  - Schema mismatches.
-  - Memory issues during Spark job execution.
-- **Solutions**:
-  - Validate input files before running the job.
-  - Use proper schema definitions.
-  - Optimize Spark configurations for memory usage.
+## Risks and Migration Considerations
+- Ensure that input data adheres to the expected schema.
+- Validate the accuracy of score bucketing logic when switching between UDF and built-in expressions.
+- Adjust Spark configuration parameters (e.g., shuffle partitions) for production-scale data.
 
-### Future Considerations
-- **Scalability**:
-  - Support for larger datasets and more complex transformations.
-- **Technology Evolution**:
-  - Adoption of newer Spark features and APIs.
-- **Maintenance**:
-  - Regular reviews and updates of documentation and code.
+## Diagrams
+### Data Flow Diagram
+```mermaid
+graph TD
+    A[events.csv] -->|loadEvents| B[Filtered Events]
+    C[users.csv] -->|loadUsers| D[User Dimensions]
+    B -->|Join| D
+    D -->|Transform| E[Parquet Output]
+```
 
----
+### Transformation Steps
+```mermaid
+graph TD
+    A[Input Data] --> B[Filter by Event Type]
+    B --> C[Filter by Time Window]
+    C --> D[Bucket Scores]
+    D --> E[Aggregate Revenue & Events]
+    E --> F[Join with User Dimensions]
+    F --> G[Rank by Revenue]
+    G --> H[Write Parquet Output]
+```
 
-**Generated by Senior Codebase Documentation Analyst and Technical Knowledge Preservation Specialist**.
+## Troubleshooting Guide
+- **Issue**: Missing or malformed input data.
+  - **Solution**: Validate input files and ensure they match the expected schema.
+- **Issue**: Performance bottlenecks.
+  - **Solution**: Optimize Spark configuration parameters (e.g., partitions, AQE).
+- **Issue**: Incorrect score bucketing.
+  - **Solution**: Verify the logic for both UDF and built-in expressions.
+
+## Recommendations
+- Regularly update documentation to reflect code changes.
+- Integrate documentation generation into the CI/CD pipeline.
+- Conduct peer reviews to ensure documentation accuracy and completeness.
+
+## Conclusion
+This documentation provides a detailed overview of the `UserMetricsJob` class, including its functionality, business logic, and implementation details. It serves as a comprehensive reference for developers and stakeholders involved in maintaining or migrating the codebase.

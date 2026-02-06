@@ -1,0 +1,32 @@
+Executive Summary:
+- Migrated the Java class 'UserMetricsJob' to Python 3.11.
+- Preserved all original logic, including Spark SQL operations, window functions, and UDF handling.
+- Verified deterministic ordering for validation.
+
+Migration Report:
+- Java SparkSession configuration mapped to Python SparkSession.
+- Java StructType and StructField replaced with Python equivalents.
+- Java methods for filtering, bucketing, and ranking mapped to Python DataFrame operations.
+- Exception handling adapted to Python try-except blocks.
+
+Python Code Sample:
+Refer to 'UserMetricsJob.py' in the 'Migrated_Code' folder.
+
+Test Suite:
+- Validated inputs and outputs for edge cases.
+- Ensured identical outputs between Java and Python implementations.
+
+Validation Results:
+- All outputs match original Java implementation.
+- No discrepancies found during testing.
+
+Troubleshooting Guide:
+- Issue: Java checked exceptions → Solution: Use Python exception hierarchy.
+- Issue: Java method overloading → Solution: Use default arguments or dynamic dispatch.
+
+Recommendations:
+- Adopt type annotations for maintainability.
+- Integrate with CI/CD for automated regression testing.
+- Optimize Spark configurations for production workloads.
+
+This report documents the migration process and serves as a reference for future enhancements.

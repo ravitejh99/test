@@ -1,0 +1,76 @@
+## UserMetricsJob Documentation
+
+### Business Logic
+The `UserMetricsJob` Spark application processes user and event data to generate metrics for analysis. It includes the following key steps:
+
+1. **Input Data Handling**:
+   - Reads `events.csv` containing user events (columns: user_id, event_type, score, amount, ts).
+   - Reads `users.csv` containing user metadata (columns: user_id, country).
+
+2. **Transformation Pipeline**:
+   - Filters events based on type (`click`, `purchase`) and a specified date window.
+   - Applies score bucketing using either a UDF or built-in column expressions.
+   - Aggregates user revenue and event counts.
+   - Joins event data with user metadata.
+   - Ranks users by revenue within each country using window functions.
+
+3. **Output Generation**:
+   - Writes the transformed data to a Parquet dataset (`country, user_id, revenue, event_count, score_bucket, country_rank`).
+
+### Intent
+The job is designed to:
+- Provide insights into user activity and revenue generation by country.
+- Enable deterministic ordering for validation purposes.
+- Support testing flexibility by allowing the use of UDFs or built-in expressions for score bucketing.
+
+### Assumptions
+1. Input CSV files are well-formed and contain the expected columns.
+2. Date window parameters (`--from`, `--to`) are provided in ISO-8601 format.
+3. The `events.csv` file may contain null values for `score` and `amount`, which are handled explicitly.
+4. SparkSession is configured with adaptive query execution (`AQE`) and shuffle partitioning.
+
+### Data Behavior
+- **Filters**: Removes events outside the specified date range or with irrelevant types.
+- **Score Bucketing**:
+  - High: `score >= 80`
+  - Medium: `score between 50 and 79`
+  - Low: `score < 50`
+  - Unknown: `score is null`
+- **Aggregations**:
+  - Calculates `revenue` as the sum of `amount` per user.
+  - Calculates `event_count` as the count of events per user.
+- **Joins**: Combines event data with user metadata using a broadcast join for performance optimization.
+- **Window Functions**: Assigns ranks to users within each country based on revenue.
+
+### Migration Considerations
+1. **Preservation of Business Logic**:
+   - Ensure filtering, bucketing, aggregations, joins, and ranking logic are preserved during migration.
+   - Validate deterministic ordering in the output.
+
+2. **Schema Compatibility**:
+   - Verify the explicit schema definitions for `events.csv` and `users.csv` align with the target system.
+
+3. **UDF Handling**:
+   - If UDFs are migrated, ensure compatibility with the target runtime environment.
+
+4. **Performance Optimization**:
+   - Retain Spark configuration settings (e.g., AQE, shuffle partitions).
+   - Ensure broadcast join behavior is replicated.
+
+5. **Error Handling**:
+   - Maintain robust error handling for Spark analysis and runtime exceptions.
+
+6. **Output Validation**:
+   - Ensure output Parquet dataset is consistent with the original system.
+
+### Code Overview
+```java
+[Insert the complete Java code here for reference.]
+```
+
+### Additional Notes
+- The job uses `.coalesce(1)` for deterministic output in testing, which should be removed for production environments.
+- Logging is implemented for job status and error tracking.
+
+### Conclusion
+The `UserMetricsJob` Spark application demonstrates a comprehensive ETL pipeline with robust business logic, flexible configuration, and error handling. Migration should focus on preserving these aspects while optimizing for the target platform.

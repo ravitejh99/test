@@ -1,0 +1,16 @@
+Validation Results:
+- All test cases passed successfully.
+- Outputs from the Python code matched the Java implementation for all inputs.
+- Edge cases validated with no discrepancies.
+
+Test Cases:
+1. Input validation tests: Passed
+2. Output verification tests: Passed
+3. Edge case tests: Passed
+
+Performance Metrics:
+- Python code execution time is comparable to Java implementation.
+- Resource utilization optimized with Spark AQE and partitioning.
+
+Conclusion:
+The migrated Python code is validated and ready for production deployment.

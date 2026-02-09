@@ -1,76 +1,105 @@
-## UserMetricsJob Documentation
+### Code Analysis
 
-### Business Logic
-The `UserMetricsJob` Spark application processes user and event data to generate metrics for analysis. It includes the following key steps:
+#### Loops and Nested Loops:
+1. **Main Method Execution Flow**:
+   - The main method orchestrates the ETL pipeline by loading data, applying transformations, and writing output.
+   - No explicit loops are present in the main method itself, but Spark operations internally iterate over the data.
 
-1. **Input Data Handling**:
-   - Reads `events.csv` containing user events (columns: user_id, event_type, score, amount, ts).
-   - Reads `users.csv` containing user metadata (columns: user_id, country).
+2. **Transform Method**:
+   - **Filter Operations**:
+     - Filters are applied to the dataset using conditions (`col("event_type").isin("click", "purchase")` and `inWindow`).
+     - These operations iterate over the dataset rows to apply the conditions.
+   - **Score Bucketing**:
+     - A conditional column (`score_bucket`) is created using either a UDF or built-in logic. This involves row-wise computation.
+   - **Aggregation**:
+     - Aggregations (`groupBy`) involve internal loops over grouped data to compute metrics like `revenue` and `event_count`.
+   - **Join Operation**:
+     - The `join` operation merges two datasets (`events` and `users`) based on `user_id`. This includes internal iterations over both datasets.
+   - **Window Functions**:
+     - The `rank` function computes ranks for users within each country. This requires nested iterations over grouped data.
 
-2. **Transformation Pipeline**:
-   - Filters events based on type (`click`, `purchase`) and a specified date window.
-   - Applies score bucketing using either a UDF or built-in column expressions.
-   - Aggregates user revenue and event counts.
-   - Joins event data with user metadata.
-   - Ranks users by revenue within each country using window functions.
+3. **loadEvents and loadUsers Methods**:
+   - These methods load data from CSV files into Spark datasets. Internally, Spark processes the files row by row.
 
-3. **Output Generation**:
-   - Writes the transformed data to a Parquet dataset (`country, user_id, revenue, event_count, score_bucket, country_rank`).
+#### Execution Flow:
+1. **Input Parameters**:
+   - File paths (`eventsPath`, `usersPath`, `outPath`) and other configuration options (`minDate`, `maxDate`, `useUdf`) are initialized.
+   
+2. **Spark Session Configuration**:
+   - A `SparkSession` is created with configurations for adaptive query execution and shuffle partitions.
 
-### Intent
-The job is designed to:
-- Provide insights into user activity and revenue generation by country.
-- Enable deterministic ordering for validation purposes.
-- Support testing flexibility by allowing the use of UDFs or built-in expressions for score bucketing.
+3. **Data Loading**:
+   - `loadEvents` and `loadUsers` are called to load datasets with explicit schemas.
 
-### Assumptions
-1. Input CSV files are well-formed and contain the expected columns.
-2. Date window parameters (`--from`, `--to`) are provided in ISO-8601 format.
-3. The `events.csv` file may contain null values for `score` and `amount`, which are handled explicitly.
-4. SparkSession is configured with adaptive query execution (`AQE`) and shuffle partitioning.
+4. **Data Transformation**:
+   - The `transform` method applies filtering, bucketing, aggregation, joining, and ranking to the data.
 
-### Data Behavior
-- **Filters**: Removes events outside the specified date range or with irrelevant types.
-- **Score Bucketing**:
-  - High: `score >= 80`
-  - Medium: `score between 50 and 79`
-  - Low: `score < 50`
-  - Unknown: `score is null`
-- **Aggregations**:
-  - Calculates `revenue` as the sum of `amount` per user.
-  - Calculates `event_count` as the count of events per user.
-- **Joins**: Combines event data with user metadata using a broadcast join for performance optimization.
-- **Window Functions**: Assigns ranks to users within each country based on revenue.
+5. **Output Writing**:
+   - The transformed dataset is written to a Parquet file with deterministic ordering.
 
-### Migration Considerations
-1. **Preservation of Business Logic**:
-   - Ensure filtering, bucketing, aggregations, joins, and ranking logic are preserved during migration.
-   - Validate deterministic ordering in the output.
+6. **Error Handling**:
+   - Exceptions are caught and logged to ensure robust execution.
 
-2. **Schema Compatibility**:
-   - Verify the explicit schema definitions for `events.csv` and `users.csv` align with the target system.
+---
 
-3. **UDF Handling**:
-   - If UDFs are migrated, ensure compatibility with the target runtime environment.
+### Visual Representations
 
-4. **Performance Optimization**:
-   - Retain Spark configuration settings (e.g., AQE, shuffle partitions).
-   - Ensure broadcast join behavior is replicated.
-
-5. **Error Handling**:
-   - Maintain robust error handling for Spark analysis and runtime exceptions.
-
-6. **Output Validation**:
-   - Ensure output Parquet dataset is consistent with the original system.
-
-### Code Overview
+#### Annotated Pseudocode:
 ```java
-[Insert the complete Java code here for reference.]
+// Main Method Execution Flow
+SparkSession spark = SparkSession.builder()
+    .appName("UserMetricsJob")
+    .config("spark.sql.adaptive.enabled", "true")
+    .config("spark.sql.shuffle.partitions", "8")
+    .getOrCreate();
+
+Dataset<Row> events = loadEvents(spark, eventsPath);
+Dataset<Row> users = loadUsers(spark, usersPath);
+Dataset<Row> transformed = transform(events, users, minDate, maxDate, useUdf);
+
+// Transform Method Logic
+Dataset<Row> filtered = events
+    .filter(col("event_type").isin("click", "purchase"))
+    .filter(col("ts").geq(to_timestamp(lit(minDate)))
+            .and(col("ts").lt(to_timestamp(lit(maxDate)))));
+
+if (useUdfBucket) {
+    filtered = filtered.withColumn("score_bucket", callUDF("bucketScore", col("score")));
+} else {
+    filtered = filtered.withColumn("score_bucket", 
+        when(col("score").isNull(), lit("unknown"))
+        .when(col("score").geq(lit(80)), lit("high"))
+        .otherwise(lit("low")));
+}
+
+Dataset<Row> aggregated = filtered.groupBy("user_id")
+    .agg(sum("amount").alias("revenue"), count("*").alias("event_count"));
+
+Dataset<Row> joined = aggregated.join(users, "user_id");
+Dataset<Row> ranked = joined.withColumn("country_rank", 
+    rank().over(Window.partitionBy("country").orderBy(desc("revenue"))));
 ```
 
-### Additional Notes
-- The job uses `.coalesce(1)` for deterministic output in testing, which should be removed for production environments.
-- Logging is implemented for job status and error tracking.
+#### Flowchart:
+1. **Start**:
+   - Initialize SparkSession and input parameters.
+2. **Load Data**:
+   - Load `events` and `users` datasets.
+3. **Filter Data**:
+   - Apply filters for event type and timestamp.
+4. **Bucket Scores**:
+   - Compute `score_bucket` using UDF or built-in logic.
+5. **Aggregate Metrics**:
+   - Compute revenue and event count for each user.
+6. **Join Datasets**:
+   - Merge `events` and `users` datasets.
+7. **Rank Users**:
+   - Assign ranks based on revenue within each country.
+8. **Write Output**:
+   - Save the transformed dataset to a Parquet file.
+9. **End**:
+   - Stop SparkSession.
 
-### Conclusion
-The `UserMetricsJob` Spark application demonstrates a comprehensive ETL pipeline with robust business logic, flexible configuration, and error handling. Migration should focus on preserving these aspects while optimizing for the target platform.
+---
+
+This documentation ensures that all business logic, workflows, and integrations are preserved during migration.

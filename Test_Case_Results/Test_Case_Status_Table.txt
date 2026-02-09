@@ -1,0 +1,5 @@
+| Test Case ID | Description                        | Coverage Area      | Status  | Notes                |
+|--------------|------------------------------------|--------------------|---------|----------------------|
+| TC-001       | Validate user login workflow       | Authentication     | Passed  |                      |
+| TC-002       | Validate data export edge case     | Data Export        | Failed  | Fixed mapping issue  |
+| TC-003       | Validate payment integration       | Payment Gateway    | Passed  |                      |

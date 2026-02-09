@@ -1,70 +1,82 @@
 import pyspark
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, when, to_timestamp, broadcast, row_number
+from pyspark.sql.functions import col, lit, when, rank, to_timestamp
 from pyspark.sql.window import Window
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, TimestampType
 
-# UserMetricsJob
-# PySpark equivalent of the Java-based Spark ETL job
+# UserMetricsJob class
+class UserMetricsJob:
+    def __init__(self, events_path, users_path, out_path, min_date, max_date, use_udf):
+        self.events_path = events_path
+        self.users_path = users_path
+        self.out_path = out_path
+        self.min_date = min_date
+        self.max_date = max_date
+        self.use_udf = use_udf
 
-def load_events(spark, path):
-    schema = StructType([
-        StructField("user_id", StringType(), True),
-        StructField("event_type", StringType(), True),
-        StructField("score", IntegerType(), True),
-        StructField("amount", DoubleType(), True),
-        StructField("ts", TimestampType(), True)
-    ])
-    return spark.read.option("header", "true").schema(schema).csv(path)
+    def spark_session(self):
+        return SparkSession.builder \
+            .appName("UserMetricsJob") \
+            .config("spark.sql.adaptive.enabled", "true") \
+            .config("spark.sql.shuffle.partitions", "8") \
+            .getOrCreate()
 
-def load_users(spark, path):
-    schema = StructType([
-        StructField("user_id", StringType(), False),
-        StructField("country", StringType(), True)
-    ])
-    return spark.read.option("header", "true").schema(schema).csv(path)
+    def load_events(self, spark):
+        schema = "user_id STRING, event_type STRING, score INT, amount DOUBLE, ts TIMESTAMP"
+        return spark.read.option("header", "true").schema(schema).csv(self.events_path)
 
-def transform(events, users, min_date, max_date, use_udf_bucket):
-    in_window = col("ts").geq(to_timestamp(lit(min_date))).and(col("ts").lt(to_timestamp(lit(max_date)))
-    filtered = events.filter(col("event_type").isin(["click", "purchase"])).filter(in_window)
+    def load_users(self, spark):
+        schema = "user_id STRING, country STRING"
+        return spark.read.option("header", "true").schema(schema).csv(self.users_path)
 
-    if use_udf_bucket:
-        spark.udf.register("bucket_score", lambda score: "unknown" if score is None else "high" if score >= 80 else "medium" if score >= 50 else "low")
-        filtered = filtered.withColumn("score_bucket", col("bucket_score"))
-    else:
-        filtered = filtered.withColumn("score_bucket", when(col("score").isNull(), lit("unknown")).when(col("score").geq(lit(80)), lit("high")).when(col("score").geq(lit(50)), lit("medium")).otherwise(lit("low")))
+    def transform(self, events, users):
+        in_window = col("ts").geq(to_timestamp(lit(self.min_date))) \
+            .and_(col("ts").lt(to_timestamp(lit(self.max_date)))
+        filtered = events.filter(col("event_type").isin("click", "purchase")) \
+            .filter(in_window)
 
-    aggregated = filtered.groupBy("user_id").agg(
-        sum("amount").alias("revenue"),
-        count("event_type").alias("event_count")
-    )
+        if self.use_udf:
+            # Register UDF here if needed
+            pass
+        else:
+            filtered = filtered.withColumn(
+                "score_bucket",
+                when(col("score").isNull(), lit("unknown"))
+                .when(col("score") >= lit(80), lit("high"))
+                .otherwise(lit("low"))
+            )
 
-    joined = broadcast(users).join(aggregated, "user_id")
+        aggregated = filtered.groupBy("user_id", "country") \
+            .agg(
+                sum("amount").alias("revenue"),
+                count("event_type").alias("event_count")
+            )
 
-    window_spec = Window.partitionBy("country").orderBy(col("revenue").desc())
-    ranked = joined.withColumn("country_rank", row_number().over(window_spec))
+        ranked = aggregated.withColumn(
+            "country_rank",
+            rank().over(Window.partitionBy("country").orderBy(col("revenue").desc()))
+        )
 
-    return ranked.orderBy("country", "country_rank")
+        return ranked
 
-def main():
-    spark = SparkSession.builder.appName("UserMetricsJob").config("spark.sql.adaptive.enabled", "true").config("spark.sql.shuffle.partitions", "8").getOrCreate()
+    def run(self):
+        spark = self.spark_session()
+        try:
+            events = self.load_events(spark)
+            users = self.load_users(spark)
+            transformed = self.transform(events, users)
+            transformed.coalesce(1).write.mode("overwrite").parquet(self.out_path)
+            transformed.show()
+        finally:
+            spark.stop()
 
-    events_path = "sample_data/events.csv"
-    users_path = "sample_data/users.csv"
-    out_path = "out/user_metrics_parquet"
-    min_date = "1970-01-01"
-    max_date = "2100-01-01"
-    use_udf = False
-
-    events = load_events(spark, events_path)
-    users = load_users(spark, users_path)
-
-    transformed = transform(events, users, min_date, max_date, use_udf)
-
-    transformed.coalesce(1).write.mode("overwrite").format("parquet").save(out_path)
-    transformed.show()
-
-    spark.stop()
-
+# Example usage
 if __name__ == "__main__":
-    main()
+    job = UserMetricsJob(
+        events_path="sample_data/events.csv",
+        users_path="sample_data/users.csv",
+        out_path="out/user_metrics_parquet",
+        min_date="1970-01-01",
+        max_date="2100-01-01",
+        use_udf=False
+    )
+    job.run()

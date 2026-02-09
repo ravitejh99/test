@@ -1,63 +1,138 @@
-### Comprehensive Documentation for UserMetricsJob
+## UserMetricsJob Documentation
 
-#### Executive Summary
-- **Project Overview**: Documentation generated for the `UserMetricsJob` class in Java.
-- **Key Achievements**: Detailed analysis of business logic, code flow, and execution patterns.
-- **Success Metrics**: Documentation completeness (100%), accuracy (99%), knowledge retention (100%).
+### Overview
+The `UserMetricsJob` program processes user event data and generates a Parquet dataset with aggregated metrics such as revenue, event count, and country rank. It demonstrates common Spark patterns, including:
+- SparkSession configuration
+- Reading CSV files with explicit schemas
+- Filtering data with edge-case handling
+- Using UDFs and built-in column expressions
+- Performing joins with broadcast hints
+- Ranking data using window functions
+- Error handling and deterministic output ordering
 
-#### Detailed Analysis
-- **Requirements Assessment**: The `UserMetricsJob` class processes user events and generates metrics, including revenue, event counts, and rankings.
-- **Technical Approach**: Static and semantic analysis of the Java code.
+### Input and Output
+#### Inputs
+1. `events.csv` with columns: `user_id`, `event_type`, `score`, `amount`, `ts` (timestamp)
+2. `users.csv` with columns: `user_id`, `country`
 
-##### Logic Explanation Example
-- **Code Reference**: `UserMetricsJob.java`, lines 45-67
-- **Logic**: The `transform` method filters events by type and timestamp, buckets scores, aggregates user revenue and events, and ranks users by revenue per country.
+#### Output
+- Parquet dataset with columns: `country`, `user_id`, `revenue`, `event_count`, `score_bucket`, `country_rank`
 
-#### Visual Representations
-- **For Loop (Event Filtering)**:
-  ```
-  for (Row event : events) {
-      if (event.getType().equals("click") || event.getType().equals("purchase")) {
-          filteredEvents.add(event);
-      }
-  }
-  ```
-- **Nested Loop (Score Bucketing)**:
-  ```
-  for (Row event : filteredEvents) {
-      for (ScoreBucket bucket : buckets) {
-          if (event.getScore() >= bucket.getMin() && event.getScore() <= bucket.getMax()) {
-              event.setBucket(bucket.getName());
-          }
-      }
-  }
-  ```
+### Execution Flow
+1. **SparkSession Configuration**: The program initializes a SparkSession with Adaptive Query Execution (AQE) and shuffle partition settings.
+2. **Input Reading**: Reads `events.csv` and `users.csv` into Spark DataFrames with explicit schemas.
+3. **Data Transformation**:
+   - Filters events by type (`click` or `purchase`) and timestamp range.
+   - Buckets scores into categories (`high`, `medium`, `low`, `unknown`) using either a UDF or built-in expressions.
+   - Aggregates user revenue and event counts.
+   - Joins user data with event metrics using a broadcast join.
+   - Ranks users by revenue within each country.
+   - Orders the output deterministically for validation.
+4. **Output Writing**: Writes the final DataFrame as a Parquet dataset.
+5. **Error Handling**: Catches and logs exceptions, ensuring the Spark session is stopped.
+
+### Detailed Logic Explanation
+#### 1. **SparkSession Configuration**
+```java
+SparkSession spark = SparkSession.builder()
+    .appName("UserMetricsJob")
+    .config("spark.sql.adaptive.enabled", "true")
+    .config("spark.sql.shuffle.partitions", "8")
+    .getOrCreate();
+```
+- Enables AQE to optimize query execution dynamically.
+- Sets shuffle partitions to 8 for performance tuning.
+
+#### 2. **Input Reading**
+- Reads `events.csv` with a schema defining columns for `user_id`, `event_type`, `score`, `amount`, and `ts`.
+- Reads `users.csv` with a schema defining columns for `user_id` and `country`.
+
+#### 3. **Data Transformation**
+##### a. Filtering Events
+Filters events by type (`click` or `purchase`) and timestamp range:
+```java
+Column inWindow = col("ts").geq(to_timestamp(lit(minDateInclusive)))
+    .and(col("ts").lt(to_timestamp(lit(maxDateExclusive))));
+
+Dataset<Row> filtered = events
+    .filter(col("event_type").isin("click", "purchase"))
+    .filter(inWindow);
+```
+
+##### b. Score Bucketing
+Uses either a UDF or built-in expressions to bucket scores:
+```java
+if (useUdfBucket) {
+    sparkRegisterBucketUdf(filtered.sparkSession());
+    filtered = filtered.withColumn("score_bucket", callUDF("bucketScore", col("score")));
+} else {
+    filtered = filtered.withColumn(
+        "score_bucket",
+        when(col("score").isNull(), lit("unknown"))
+            .when(col("score").geq(lit(80)), lit("high"))
+            .when(col("score").geq(lit(50)), lit("medium"))
+            .otherwise(lit("low"))
+    );
+}
+```
+
+##### c. Aggregating Metrics
+Aggregates user revenue and event counts:
+```java
+Dataset<Row> aggregated = filtered
+    .groupBy("user_id", "score_bucket")
+    .agg(
+        sum("amount").as("revenue"),
+        count("*").as("event_count")
+    );
+```
+
+##### d. Joining User Data
+Joins user data with event metrics using a broadcast join:
+```java
+Dataset<Row> joined = aggregated
+    .join(broadcast(users), "user_id");
+```
+
+##### e. Ranking Users
+Ranks users by revenue within each country:
+```java
+WindowSpec rankSpec = Window.partitionBy("country").orderBy(desc("revenue"));
+Dataset<Row> ranked = joined.withColumn("country_rank", rank().over(rankSpec));
+```
+
+##### f. Ordering Output
+Orders the output deterministically:
+```java
+return ranked.orderBy("country", "country_rank", "user_id");
+```
+
+### Visual Representations
+#### Loop and Nested Loop Analysis
+- **No explicit loops**: The program relies on Spark's distributed processing.
 
 #### Flowchart
 ```plaintext
-[Start] --> [Load Events] --> [Load Users] --> [Filter Events] --> [Bucket Scores] --> [Aggregate Metrics] --> [Rank Users] --> [Write Output] --> [End]
+[Start] --> [Initialize SparkSession] --> [Read events.csv] --> [Read users.csv] -->
+[Filter events] --> [Bucket scores] --> [Aggregate metrics] --> [Join user data] -->
+[Rank users] --> [Order output] --> [Write Parquet] --> [End]
 ```
 
-#### Step-by-Step Implementation
-1. **Setup Instructions**: Import the Java code into an IDE.
-2. **Run Instructions**: Execute the `main` method with appropriate arguments.
-3. **Validation Steps**: Verify the Parquet output for correctness.
+### Error Handling
+The program handles exceptions during execution and logs errors:
+```java
+try {
+    // Main execution logic
+} catch (AnalysisException ae) {
+    log.error("Spark analysis error: {}", ae.getMessage(), ae);
+    throw new RuntimeException("Analysis exception during job run", ae);
+} catch (Exception e) {
+    log.error("Unexpected error: {}", e.getMessage(), e);
+    throw new RuntimeException("Unhandled exception", e);
+} finally {
+    spark.stop();
+}
+```
 
-#### Quality Metrics
-- **Documentation Completeness**: 100%
-- **Accuracy**: 99%
-- **Knowledge Retention**: 100%
-
-#### Recommendations
-- Regularly update documentation to reflect code changes.
-- Integrate documentation into CI/CD pipelines.
-
-#### Troubleshooting Guide
-- **Common Issues**: Missing input files, incorrect arguments.
-- **Solutions**: Ensure all required files are present and arguments are correctly specified.
-
-#### Future Considerations
-- Enhance documentation with automated tools.
-- Plan for scalability and maintainability.
-
-### End of Documentation
+### Conclusion
+The `UserMetricsJob` program demonstrates efficient ETL processing using Apache Spark. Its modular design and use of Spark's features make it a robust solution for large-scale data processing.

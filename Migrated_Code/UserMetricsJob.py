@@ -1,47 +1,6 @@
-import pyspark
+import pyspark.sql.functions as F
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, when, to_timestamp, expr, udf
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, TimestampType
-
-# UserMetricsJob
-# This script demonstrates the migration of the Java-based Spark ETL application to Python using PySpark.
-
-def main():
-    # Configuration
-    events_path = 'sample_data/events.csv'
-    users_path = 'sample_data/users.csv'
-    out_path = 'out/user_metrics_parquet'
-    min_date = '1970-01-01'
-    max_date = '2100-01-01'
-    use_udf = False
-
-    spark = SparkSession.builder \
-        .appName("UserMetricsJob") \
-        .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.sql.shuffle.partitions", "8") \
-        .getOrCreate()
-
-    try:
-        print(f"Starting job with events={events_path}, users={users_path}, out={out_path}, window=[{min_date}, {max_date}], use_udf={use_udf}")
-
-        events = load_events(spark, events_path)
-        users = load_users(spark, users_path)
-
-        transformed = transform(events, users, min_date, max_date, use_udf)
-
-        # Write Parquet output
-        transformed.coalesce(1).write.mode("overwrite").format("parquet").save(out_path)
-
-        # For quick visibility in logs
-        transformed.show(truncate=False)
-
-        print(f"Job completed successfully. Output: {out_path}")
-
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        raise
-    finally:
-        spark.stop()
 
 def load_events(spark, path):
     schema = StructType([
@@ -51,7 +10,6 @@ def load_events(spark, path):
         StructField("amount", DoubleType(), True),
         StructField("ts", TimestampType(), True)
     ])
-
     return spark.read.option("header", "true").schema(schema).csv(path)
 
 def load_users(spark, path):
@@ -59,49 +17,66 @@ def load_users(spark, path):
         StructField("user_id", StringType(), False),
         StructField("country", StringType(), True)
     ])
-
     return spark.read.option("header", "true").schema(schema).csv(path)
 
-def transform(events, users, min_date, max_date, use_udf):
-    in_window = (col("ts") >= to_timestamp(lit(min_date))) & (col("ts") < to_timestamp(lit(max_date)))
+def transform(events, users, min_date_inclusive, max_date_exclusive, use_udf_bucket):
+    in_window = (F.col("ts") >= F.to_timestamp(F.lit(min_date_inclusive))) & (F.col("ts") < F.to_timestamp(F.lit(max_date_exclusive)))
 
-    filtered = events.filter(col("event_type").isin("click", "purchase")).filter(in_window)
+    filtered = events.filter(F.col("event_type").isin("click", "purchase")).filter(in_window)
 
-    if use_udf:
-        filtered = filtered.withColumn("score_bucket", udf_bucket_score()(col("score")))
+    if use_udf_bucket:
+        def bucket_score(score):
+            if score is None:
+                return "unknown"
+            elif score >= 80:
+                return "high"
+            elif score >= 50:
+                return "medium"
+            else:
+                return "low"
+
+        spark.udf.register("bucketScore", bucket_score)
+        filtered = filtered.withColumn("score_bucket", F.expr("bucketScore(score)"))
     else:
         filtered = filtered.withColumn(
             "score_bucket",
-            when(col("score").isNull(), lit("unknown"))
-            .when(col("score") >= 80, lit("high"))
-            .when(col("score") >= 50, lit("medium"))
-            .otherwise(lit("low"))
+            F.when(F.col("score").isNull(), F.lit("unknown"))
+            .when(F.col("score") >= 80, F.lit("high"))
+            .when(F.col("score") >= 50, F.lit("medium"))
+            .otherwise(F.lit("low"))
         )
 
     aggregated = filtered.groupBy("user_id").agg(
-        expr("sum(amount) as revenue"),
-        expr("count(event_type) as event_count")
+        F.sum("amount").alias("revenue"),
+        F.count("event_type").alias("event_count")
     )
 
     joined = aggregated.join(users, "user_id", "left")
 
-    window_spec = Window.partitionBy("country").orderBy(col("revenue").desc())
-    ranked = joined.withColumn("country_rank", rank().over(window_spec))
+    window_spec = F.Window.partitionBy("country").orderBy(F.desc("revenue"))
+    ranked = joined.withColumn("country_rank", F.rank().over(window_spec))
 
     return ranked.orderBy("country", "country_rank")
 
-def udf_bucket_score():
-    @udf(StringType())
-    def bucket_score(score):
-        if score is None:
-            return "unknown"
-        elif score >= 80:
-            return "high"
-        elif score >= 50:
-            return "medium"
-        else:
-            return "low"
-    return bucket_score
+def main():
+    spark = SparkSession.builder.appName("UserMetricsJob").config("spark.sql.adaptive.enabled", "true").config("spark.sql.shuffle.partitions", "8").getOrCreate()
+
+    events_path = "sample_data/events.csv"
+    users_path = "sample_data/users.csv"
+    out_path = "out/user_metrics_parquet"
+    min_date = "1970-01-01"
+    max_date = "2100-01-01"
+    use_udf = False
+
+    events = load_events(spark, events_path)
+    users = load_users(spark, users_path)
+
+    transformed = transform(events, users, min_date, max_date, use_udf)
+
+    transformed.coalesce(1).write.mode("overwrite").format("parquet").save(out_path)
+    transformed.show()
+
+    spark.stop()
 
 if __name__ == "__main__":
     main()

@@ -6,28 +6,33 @@ class TestUserMetricsJob(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.spark = SparkSession.builder.master("local[*]").appName("TestUserMetricsJob").getOrCreate()
+        cls.spark = SparkSession.builder \
+            .appName("UserMetricsJobTest") \
+            .config("spark.sql.adaptive.enabled", "true") \
+            .getOrCreate()
 
     @classmethod
     def tearDownClass(cls):
         cls.spark.stop()
 
     def test_transform(self):
-        events_data = [("u1", "click", 85, 100.0, "2023-10-01T12:00:00"),
-                       ("u2", "purchase", 45, 200.0, "2023-10-02T12:00:00")]
-        events_schema = ["user_id", "event_type", "score", "amount", "ts"]
-        events_df = self.spark.createDataFrame(events_data, events_schema)
+        events_data = [("user1", "click", 90, 15.0, "2023-01-01T12:00:00"),
+                       ("user2", "purchase", 45, 30.0, "2023-01-02T15:00:00")]
+        events_schema = "user_id STRING, event_type STRING, score INT, amount DOUBLE, ts TIMESTAMP"
+        events = self.spark.createDataFrame(events_data, schema=events_schema)
 
-        users_data = [("u1", "US"),
-                      ("u2", "IN")]
-        users_schema = ["user_id", "country"]
-        users_df = self.spark.createDataFrame(users_data, users_schema)
+        users_data = [("user1", "US"), ("user2", "UK")]
+        users_schema = "user_id STRING, country STRING"
+        users = self.spark.createDataFrame(users_data, schema=users_schema)
 
-        result = transform(events_df, users_df, "2023-10-01", "2023-10-03", False)
-        result.show()
+        result = transform(events, users, "2023-01-01", "2023-12-31", False)
 
-        self.assertEqual(result.count(), 2)
-        self.assertEqual(result.filter(result.user_id == "u1").select("country").collect()[0][0], "US")
+        expected_data = [("US", "user1", 15.0, 1, "high", 1),
+                         ("UK", "user2", 30.0, 1, "low", 1)]
+        expected_schema = "country STRING, user_id STRING, revenue DOUBLE, event_count INT, score_bucket STRING, country_rank INT"
+        expected = self.spark.createDataFrame(expected_data, schema=expected_schema)
+
+        self.assertEqual(result.collect(), expected.collect())
 
 if __name__ == "__main__":
     unittest.main()

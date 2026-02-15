@@ -1,89 +1,57 @@
-import csv
-from datetime import datetime
-from collections import defaultdict
+import pyspark.sql.functions as F
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType
+from datetime import datetime
 
 class OrderProcessor:
-    class Status:
-        NEW = "NEW"
-        PROCESSING = "PROCESSING"
-        DELIVERED = "DELIVERED"
-        CANCELLED = "CANCELLED"
+    def __init__(self, spark):
+        self.spark = spark
 
-    def __init__(self, spark_session):
-        self.spark = spark_session
+    def read_orders_from_csv(self, path):
+        schema = StructType([
+            StructField('orderId', StringType(), True),
+            StructField('customer', StringType(), True),
+            StructField('status', StringType(), True),
+            StructField('amount', DoubleType(), True),
+            StructField('date', DateType(), True)
+        ])
+        return self.spark.read.csv(path, schema=schema, header=True)
 
-    def read_orders_from_csv(self, file_path):
-        orders = []
-        with open(file_path, 'r') as file:
-            csv_reader = csv.reader(file)
-            next(csv_reader)  # Skip header
-            for row in csv_reader:
-                if len(row) < 5:
-                    print(f"WARN: Skipping malformed line: {row}")
-                    continue
-                try:
-                    order_id, customer, status, amount, date = row
-                    amount = float(amount)
-                    date = datetime.strptime(date, '%Y-%m-%d').date()
-                    orders.append({
-                        'order_id': order_id,
-                        'customer': customer,
-                        'status': status.upper(),
-                        'amount': amount,
-                        'date': date
-                    })
-                except Exception as e:
-                    print(f"WARN: Skipping malformed line: {row} ({e})")
-        return orders
+    def process_orders(self, orders_df):
+        delivered_df = orders_df.filter(orders_df.status == 'DELIVERED')
+        total_revenue_delivered = delivered_df.agg(F.sum('amount').alias('total_revenue')).collect()[0]['total_revenue']
+        cancelled_count = orders_df.filter(orders_df.status == 'CANCELLED').count()
 
-    def process_orders(self, orders):
-        if not orders:
-            print("No orders to process.")
-            return
+        revenue_by_customer = delivered_df.groupBy('customer').agg(F.sum('amount').alias('revenue')).orderBy(F.desc('revenue'))
+        top_customers = revenue_by_customer.limit(3).collect()
 
-        delivered_orders = [o for o in orders if o['status'] == self.Status.DELIVERED]
-        cancelled_orders = [o for o in orders if o['status'] == self.Status.CANCELLED]
-        
-        total_revenue_delivered = sum(o['amount'] for o in delivered_orders)
-        cancelled_count = len(cancelled_orders)
+        monthly_revenue = delivered_df.withColumn('month', F.date_format('date', 'yyyy-MM')).groupBy('month').agg(F.sum('amount').alias('monthly_revenue')).orderBy('month')
 
-        revenue_by_customer = defaultdict(float)
-        for o in delivered_orders:
-            revenue_by_customer[o['customer']] += o['amount']
-
-        top_customers = sorted(revenue_by_customer.items(), key=lambda x: x[1], reverse=True)[:3]
-
-        monthly_revenue = defaultdict(float)
-        for o in delivered_orders:
-            key = f"{o['date'].year}-{o['date'].month:02d}"
-            monthly_revenue[key] += o['amount']
+        invalid_orders_count = orders_df.filter(
+            (orders_df.orderId.isNull()) | (orders_df.customer.isNull()) | (orders_df.amount < 0) | (orders_df.date.isNull())
+        ).count()
 
         print("=== Order Summary ===")
-        print(f"Total orders: {len(orders)}")
-        print(f"Delivered revenue: {total_revenue_delivered:.2f}")
+        print(f"Total orders: {orders_df.count()}")
+        print(f"Delivered revenue: {total_revenue_delivered}")
         print(f"Cancelled count: {cancelled_count}")
-        print()
+        print(f"Invalid orders: {invalid_orders_count}")
 
-        print("=== Revenue by Customer (DELIVERED) ===")
-        for customer, revenue in sorted(revenue_by_customer.items(), key=lambda x: x[1], reverse=True):
-            print(f" {customer} -> {revenue:.2f}")
-        print()
+        print("\n=== Revenue by Customer (DELIVERED) ===")
+        revenue_by_customer.show()
 
-        print("=== Top Customers ===")
-        for i, (customer, revenue) in enumerate(top_customers, 1):
-            print(f" {i}) {customer}: {revenue:.2f}")
-        print()
+        print("\n=== Top Customers ===")
+        for idx, row in enumerate(top_customers):
+            print(f"{idx + 1}) {row['customer']}: {row['revenue']}")
 
-        print("=== Monthly Revenue (DELIVERED) ===")
-        for month, revenue in sorted(monthly_revenue.items()):
-            print(f" {month} -> {revenue:.2f}")
-        print()
+        print("\n=== Monthly Revenue (DELIVERED) ===")
+        monthly_revenue.show()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     spark = SparkSession.builder.appName("OrderProcessor").getOrCreate()
     processor = OrderProcessor(spark)
 
-    file_path = "path/to/orders.csv"  # Replace with the actual file path
-    orders = processor.read_orders_from_csv(file_path)
-    processor.process_orders(orders)
+    # Replace 'path_to_csv' with the actual path to your CSV file
+    path_to_csv = "path/to/orders.csv"
+    orders_df = processor.read_orders_from_csv(path_to_csv)
+    processor.process_orders(orders_df)

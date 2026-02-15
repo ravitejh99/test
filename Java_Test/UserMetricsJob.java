@@ -7,26 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory; 
 import java.util.Arrays; 
 import static org.apache.spark.sql.functions.*; 
-/** 
- * UserMetricsJob 
- * 
- * Demonstrates common Spark patterns your conversion/documentation agent should handle: 
- * - SparkSession config (AQE, shuffle) 
- * - Reading CSV with explicit schema 
- * - Filters with null/edge-case handling 
- * - UDF vs. built-in column expressions 
- * - Joins (with broadcast hint) 
- * - Window functions (rank per country) 
- * - Error handling + logging 
- * - Deterministic output ordering for validation 
- * 
- * Inputs (CSV): 
- * events.csv columns: user_id,event_type,score,amount,ts (timestamp in ISO-8601) 
- * users.csv columns: user_id,country 
- * 
- * Output: 
- * Parquet dataset with: country, user_id, revenue, event_count, score_bucket, country_rank 
- */ 
+
 public class UserMetricsJob { 
  private static final Logger log = LoggerFactory.getLogger(UserMetricsJob.class); 
  public static void main(String[] args) { 
@@ -47,14 +28,14 @@ public class UserMetricsJob {
  Dataset<Row> events = loadEvents(spark, eventsPath); 
  Dataset<Row> users = loadUsers(spark, usersPath); 
  Dataset<Row> transformed = transform(events, users, minDate, maxDate, useUdf); 
- // Write Parquet output 
+
  transformed 
  .coalesce(1) // for test determinism on small data; remove in production 
  .write() 
  .mode(SaveMode.Overwrite) 
  .format("parquet") 
  .save(outPath); 
- // For quick visibility in tests/logs 
+ 
  transformed.show(false); 
  log.info("Job completed successfully. Output: {}", outPath); 
  } catch (AnalysisException ae) { 
@@ -67,7 +48,7 @@ public class UserMetricsJob {
  spark.stop(); 
  } 
  } 
- // -------- I/O -------- 
+
  private static Dataset<Row> loadEvents(SparkSession spark, String path) { 
  StructType schema = new StructType(new StructField[]{ 
  new StructField("user_id", DataTypes.StringType, true, Metadata.empty()), 
@@ -91,30 +72,23 @@ public class UserMetricsJob {
  .schema(schema) 
  .csv(path); 
  } 
- // -------- Core Transform -------- 
- /**
-  * Transform:
-  * 1) Filter by ts date window 
-  * 2) Bucket score (UDF or built-in) 
-  * 3) Aggregate user revenue & events 
-  * 4) Join user dims (broadcast) 
-  * 5) Rank users by revenue per country 
-  * 6) Deterministic ordering for validation 
-  */ 
+ 
  public static Dataset<Row> transform( 
  Dataset<Row> events, 
  Dataset<Row> users, 
  String minDateInclusive, 
  String maxDateExclusive, 
  boolean useUdfBucket 
- ) { 
- // 1) Filter by event type and time window 
+ )
+ 
+ { 
+ 
  Column inWindow = col("ts").geq(to_timestamp(lit(minDateInclusive))) 
  .and(col("ts").lt(to_timestamp(lit(maxDateExclusive)))); 
  Dataset<Row> filtered = events 
  .filter(col("event_type").isin("click", "purchase")) 
  .filter(inWindow); 
- // NOTE: The original source appears truncated here. Keeping as-is.
+ 
  return filtered; 
  } 
  private static String getArg(String[] args, String key, String defaultVal) { 
@@ -124,6 +98,6 @@ public class UserMetricsJob {
  return defaultVal; 
  }
  private static void sparkRegisterBucketUdf(SparkSession spark) {
- // placeholder due to truncated source
+ 
  }
 }

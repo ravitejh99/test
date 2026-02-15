@@ -6,20 +6,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.*; 
 import java.util.stream.Collectors; 
 import java.util.stream.Stream; 
-/** 
- * A general-purpose Java program that: 
- * - Reads orders from a CSV (or uses built-in sample data if no file is given) 
- * - Parses and validates records 
- * - Computes aggregates using Java Streams 
- * - Demonstrates error handling and clean output 
- * 
- * CSV format (with header): 
- * order_id,customer,status,amount,date 
- * 1001,Alice,DELIVERED,120.50,2024-05-01 
- * 1002,Bob,CANCELLED, 75.00,2024-05-02 
- */ 
+
 public class OrderProcessor { 
- // Accepted statuses for demonstration 
+ 
  enum Status { NEW, PROCESSING, DELIVERED, CANCELLED } 
  public static void main(String[] args) { 
  Optional<Path> csvPath = args.length > 0 ? Optional.of(Path.of(args[0])) : Optional.empty(); 
@@ -30,7 +19,7 @@ public class OrderProcessor {
  System.out.println("No orders to process."); 
  return; 
  } 
- // 1) Basic metrics 
+ 
  double totalRevenueDelivered = orders.stream() 
  .filter(o -> o.status == Status.DELIVERED) 
  .mapToDouble(o -> o.amount) 
@@ -38,29 +27,29 @@ public class OrderProcessor {
  long cancelledCount = orders.stream() 
  .filter(o -> o.status == Status.CANCELLED) 
  .count(); 
- // 2) Revenue by customer (DELIVERED only) 
+ 
  Map<String, Double> revenueByCustomer = orders.stream() 
  .filter(o -> o.status == Status.DELIVERED) 
  .collect(Collectors.groupingBy( 
  o -> o.customer, 
  Collectors.summingDouble(o -> o.amount) 
  )); 
- // 3) Top N customers by revenue 
+
  int TOP_N = 3; 
  List<Map.Entry<String, Double>> topCustomers = revenueByCustomer.entrySet().stream() 
  .sorted(Map.Entry.<String, Double>comparingByValue().reversed()) 
  .limit(TOP_N) 
  .toList(); 
- // 4) Monthly revenue (YYYY-MM) 
+
  Map<String, Double> monthlyRevenue = orders.stream() 
  .filter(o -> o.status == Status.DELIVERED) 
  .collect(Collectors.groupingBy( 
  o -> o.date.getYear() + "-" + String.format("%02d", o.date.getMonthValue()), 
  Collectors.summingDouble(o -> o.amount) 
  )); 
- // 5) Simple quality checks 
+  
  long invalidOrders = orders.stream().filter(o -> !o.isValid()).count(); 
- // ------- Output ------- 
+ 
  System.out.println("=== Order Summary ==="); 
  System.out.printf("Total orders: %d%n", orders.size()); 
  System.out.printf("Delivered revenue: %.2f%n", totalRevenueDelivered); 
@@ -86,7 +75,7 @@ public class OrderProcessor {
  System.out.println("=== Sample Records (first 5) ==="); 
  orders.stream().limit(5).forEach(o -> System.out.println(" " + o)); 
  } 
- /** Reads orders from a CSV file. Skips header. Skips invalid lines with a warning. */ 
+ 
  private static List<Order> readOrdersFromCsv(Path path) { 
  List<Order> results = new ArrayList<>(); 
  DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd"); 
@@ -97,7 +86,7 @@ public class OrderProcessor {
  while (it.hasNext()) { 
  String line = it.next().trim(); 
  if (!headerSkipped) { 
- headerSkipped = true; // assume first line is header 
+ headerSkipped = true; 
  continue; 
  } 
  if (line.isEmpty()) continue; 
@@ -127,7 +116,7 @@ public class OrderProcessor {
  System.out.printf("Parsed %d orders, skipped %d invalid lines%n", counters[0], counters[1]); 
  return results; 
  } 
- /** Built-in sample data if no file is provided. */ 
+  
  private static List<Order> sampleOrders() { 
  return List.of( 
  new Order("1001", "Alice", Status.DELIVERED, 120.50, LocalDate.parse("2024-05-01")), 
@@ -139,7 +128,7 @@ public class OrderProcessor {
  ); 
  } 
 } 
-/** Simple domain class with validation and readable toString(). */ 
+
 class Order { 
  final String orderId; 
  final String customer; 
